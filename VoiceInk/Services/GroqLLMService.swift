@@ -37,7 +37,7 @@ class GroqLLMService: LLMProvider {
                 GroqChatMessage(role: "user", content: text)
             ],
             max_tokens: 4096,
-            temperature: 0.3
+            temperature: 0.1
         )
 
         request.httpBody = try JSONEncoder().encode(requestBody)

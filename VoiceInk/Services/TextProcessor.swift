@@ -157,6 +157,14 @@ class TextProcessor: ObservableObject {
         var finalText = transcriptionResult.text
         var llmModel: String? = nil
 
+        // 檢查 STT 結果是否有實質內容（過濾空錄音、無意義文字）
+        let trimmedText = transcriptionResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedText.count >= 2 else {
+            state = .idle
+            AppLogger.warning("STT 結果過短或為空（\(trimmedText.count) 字），已忽略")
+            return
+        }
+
         // 步驟 2：LLM 文字潤飾（永遠執行）
         state = .processing
         let prompt = loadPrompt()

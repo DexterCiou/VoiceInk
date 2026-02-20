@@ -16,8 +16,9 @@ macOS 原生語音輸入應用程式。使用者按下全域快捷鍵（預設 �
 ```
 快捷鍵開始錄音 → 說話 → 快捷鍵停止
 → Groq Whisper STT（語音轉文字）
-→ LLM 文字潤飾（預設 Groq Llama 3.3 70B）
-  ├── 預設規則永遠生效（繁中、去贅詞、去重複、修錯字）
+→ 檢查 STT 結果（不到 2 字則跳過，不送 LLM）
+→ LLM 文字潤飾（預設 Groq Llama 3.3 70B，temperature 0.1）
+  ├── 預設規則永遠生效（英文指令 + 繁中潤飾規則）
   ├── 自訂字典詞彙自動帶入（提升專有名詞辨識）
   └── 使用者額外規則追加（如有設定）
 → 自動貼上到目前焦點的 App（或複製到剪貼簿 + 浮動通知）
@@ -55,10 +56,10 @@ VoiceInk/
     │   ├── HotKeyManager.swift        # HotKey 套件封裝，全域快捷鍵（支援無修飾鍵的特殊鍵）
     │   ├── GroqWhisperService.swift   # Groq Whisper API（multipart/form-data 上傳）
     │   ├── LLMProvider.swift          # LLM 協議（protocol）
-    │   ├── GroqLLMService.swift       # Groq Chat API（Llama 3.3 70B），與 Whisper 共用 API Key
+    │   ├── GroqLLMService.swift       # Groq Chat API（Llama 3.3 70B），temperature 0.1
     │   ├── ClaudeService.swift        # Anthropic Claude API
-    │   ├── OpenAIService.swift        # OpenAI GPT API
-    │   ├── TextProcessor.swift        # 核心協調器：錄音 → STT → LLM → 貼上，含字典整合
+    │   ├── OpenAIService.swift        # OpenAI GPT API，temperature 0.1
+    │   ├── TextProcessor.swift        # 核心協調器：錄音 → STT → 空內容檢查 → LLM → 貼上
     │   ├── PasteEngine.swift          # 剪貼簿 + CGEvent 模擬 ⌘V + ToastWindow 浮動通知
     │   └── StatsManager.swift         # SwiftData CRUD，統計查詢（含 totalDuration）
     │
@@ -91,7 +92,7 @@ VoiceInk/
     │       └── MenuBarView.swift          # 目前未使用（MenuBarExtra 有問題，改用 NSStatusBar）
     │
     └── Resources/
-        └── DefaultPrompt.txt          # 預設潤飾規則（9 條，永遠生效）
+        └── DefaultPrompt.txt          # 預設潤飾規則（英文指令框架 + 8 條潤飾規則，永遠生效）
 ```
 
 ## 技術決策與原因
@@ -104,6 +105,10 @@ VoiceInk/
 | **Groq 作為預設 LLM** | 與 Whisper STT 共用同一組 API Key，使用者不需額外設定 |
 | **LLM 潤飾永遠啟用** | 使用者認為 AI 潤飾是核心功能，不應有開關；改為可自訂「額外規則」 |
 | **預設規則永遠存在 + 額外規則追加** | 避免使用者不小心覆蓋基本規則（繁中、去贅詞等），額外規則只做補充 |
+| **預設 prompt 用英文撰寫** | Llama 3.3 70B 對英文指令的遵從度遠高於中文，用英文寫角色定義和禁止事項能有效防止 LLM 自行添加對話性回覆（如「好的，以下是…」） |
+| **temperature 0.1** | 文字轉換任務需要高確定性，低 temperature 讓 LLM 更嚴格遵守指令，減少偷懶直接放行簡體中文或自行發揮 |
+| **STT 空內容檢查** | 空錄音或無意義錄音會讓 Whisper 回傳空字串，直接送 LLM 會導致 LLM 自己編造回覆（如「請輸入文字」），因此 STT 結果不到 2 字時直接跳過 LLM |
+| **user message 只傳原始文字** | 曾嘗試在 user message 加指令性前綴「請將以下語音轉錄文字潤飾為繁體中文：」，反而讓 LLM 用對話模式回覆，改回只傳純文字效果更好 |
 | **字典詞彙嵌入 system prompt** | 將自訂詞彙以【自訂字典】標籤附加到 prompt，LLM 能直接參照替換，不需額外 API 呼叫 |
 | **CGEvent + cgSessionEventTap** | 比 cghidEventTap 更可靠的鍵盤事件注入方式 |
 | **combinedSessionState** | CGEventSource 使用 combinedSessionState 而非 hidSystemState，避免事件衝突 |
@@ -129,6 +134,7 @@ VoiceInk/
 - `@MainActor class`，管理 `ProcessingState` 狀態機：idle → recording → transcribing → processing → completed → idle
 - 使用 Combine `assign(to:)` 將 `audioRecorder.$currentDuration` 轉發為自身的 `$recordingDuration`
 - 3 秒後自動從 `.completed` 回到 `.idle`
+- STT 結果空內容檢查：`trimmedText.count >= 2` 才送 LLM，避免空錄音導致 LLM 自行編造回覆
 - `loadPrompt()` 組裝邏輯：
   1. **預設規則**（DefaultPrompt.txt）— 永遠存在
   2. **【自訂字典】**（從 SwiftData 讀取 DictionaryWord）— 有詞彙時才附加
@@ -136,16 +142,31 @@ VoiceInk/
 - 需要 `ModelContext` 來讀取字典，透過 `setModelContext()` 由 ContentView 注入
 
 ### 預設潤飾規則（DefaultPrompt.txt）
-永遠作為 system message 傳給 LLM，共 9 條規則：
-1. 一律繁體中文（台灣用語）
-2. 修正語音辨識錯誤與錯別字
-3. 適當加入標點符號
-4. 保持原始語意不變
-5. 保留英文專有名詞不翻譯
-6. 移除口語贅詞（嗯、啊、喔、欸、那個、就是說、對、然後）
-7. 移除重複語句（保留最完整的一句）
-8. 字典詞彙優先替換（發音相近、拼寫相似時替換為字典正確寫法）
-9. 直接輸出，不加說明
+永遠作為 system message 傳給 LLM。**使用英文撰寫指令框架**（角色定義、禁止事項），**潤飾規則用中英混合**。
+
+結構分三段：
+1. **角色定義**：「You are a text-to-text converter, not a chatbot」— 明確告訴 LLM 不是聊天機器人
+2. **CRITICAL RULES（嚴格禁止）**：禁止加入「好的」、「以下是」等開頭語，禁止對話性回覆，禁止任何說明文字
+3. **Polishing rules（潤飾規則，共 8 條）**：
+   1. 一律繁體中文（台灣用語），禁止簡體
+   2. 修正語音辨識錯誤與錯別字
+   3. 適當加入標點符號
+   4. 保持原始語意不變
+   5. 保留英文專有名詞不翻譯
+   6. 移除口語贅詞（嗯、啊、喔、欸、那個、就是說、對、然後）
+   7. 移除重複語句（保留最完整的一句）
+   8. 字典詞彙優先替換（發音相近、拼寫相似時替換為字典正確寫法）
+
+**重要經驗**：
+- prompt 用中文寫時，Llama 3.3 70B 容易忽略「直接輸出」的指令，改用英文後遵從度大幅提升
+- user message 不要加指令性前綴（如「請將以下文字潤飾」），只傳原始文字，否則 LLM 會以對話模式回覆
+- temperature 必須設 0.1（不是 0.3），越低 LLM 越嚴格遵守格式指令
+
+### LLM 服務共通設定
+- **GroqLLMService**：Llama 3.3 70B，temperature 0.1，user message 只傳原始文字
+- **ClaudeService**：claude-sonnet-4-20250514，user message 只傳原始文字
+- **OpenAIService**：gpt-4o-mini，temperature 0.1，user message 只傳原始文字
+- 三個服務的 `process(text:prompt:)` 都是 system=prompt、user=text（純文字，無前綴）
 
 ### 字典功能（DictionaryWord + DictionaryView）
 - `DictionaryWord`：SwiftData @Model，儲存 `word`（詞彙）和 `createdAt`（建立時間）
@@ -200,14 +221,19 @@ VoiceInk/
 | MenuBarExtra 圖示不顯示 | 原因未明，可能與 Xcode 26.2 或 SwiftUI Scene 衝突有關 | **改用 NSStatusBar API**，在 AppDelegate 中直接建立狀態列圖示 |
 | 每次 Xcode 重編後輔助使用權限被撤銷 | macOS 以 binary 簽名判斷身份，debug build 每次簽名不同 | 開發期間需手動重新開啟（路徑：`~/Library/Developer/Xcode/DerivedData/VoiceInk-xxx/Build/Products/Debug/VoiceInk.app`）；正式 code sign 後不會發生 |
 | 每次 Xcode 重編後 Keychain 存取需確認密碼 | 同上，binary 簽名變更 | 點「永遠允許」；正式簽名後不會發生 |
-| Groq Whisper 輸出簡體中文 | Whisper 模型預設行為 | 在 LLM 預設潤飾規則第 1 條強制「一律使用繁體中文（台灣用語）」 |
+| Groq Whisper 輸出簡體中文 | Whisper 模型預設行為 | 在 LLM 預設潤飾規則強制「Convert ALL output to 繁體中文 — NEVER output 簡體中文」 |
+| LLM 輸出對話性回覆（「好的，以下是…」） | 中文 system prompt 對 Llama 3.3 70B 的約束力不足，LLM 把自己當聊天機器人 | **改用英文寫 system prompt**（角色定義 + CRITICAL RULES 禁止事項），user message 只傳原始文字不加指令前綴 |
+| LLM 仍輸出簡體中文 | temperature 0.3 太高，LLM 遵從指令的確定性不夠 | **降低 temperature 到 0.1**（Groq + OpenAI 都改了） |
+| 空錄音導致 LLM 自行編造回覆 | 沒講話就停止 → Whisper 回傳空字串 → LLM 沒內容可潤飾就自己編 | **加入 STT 空內容檢查**：結果不到 2 字直接跳過，不送 LLM |
+| user message 加指令前綴導致 LLM 對話式回覆 | 「請將以下語音轉錄文字潤飾為繁體中文：」讓 LLM 以為使用者在對話 | **撤回指令前綴**，user message 只傳純原始文字 |
+| macOS Gatekeeper 判定為惡意軟體 | .dmg 下載後被加上 quarantine 屬性，無 notarization | 接收方執行 `xattr -cr /Applications/VoiceInk.app` 移除隔離標記 |
 | 巢狀 ObservableObject 不更新 UI | SwiftUI 只觀察直接的 @Published，不會深入巢狀物件 | 用 Combine `assign(to:)` 將 audioRecorder.currentDuration 轉發到 textProcessor.recordingDuration |
 | `@MainActor` 初始化錯誤 | AppDelegate 的 stored property 在 nonisolated context 初始化 @MainActor 物件 | 在 AppDelegate class 上加 `@MainActor` |
 | HotKeyManager 缺少 `import AppKit` | `NSEvent.ModifierFlags` 需要 AppKit | 加入 `import AppKit` |
 | xcodegen 覆寫 Info.plist/entitlements | xcodegen 會重新生成這些檔案 | 自訂屬性改放在 project.yml 的 `info.properties` 和 `entitlements.properties` |
 | SwiftUI onKeyPress 無法捕捉特殊鍵 | `onKeyPress` 只能接收字母/數字等標準按鍵 | 改用 `NSEvent.addLocalMonitorForEvents(matching: .keyDown)` 直接取得 raw keyCode |
 | Fn 鍵無法作為全域快捷鍵 | Fn/🌐 是硬體層級修飾鍵，macOS 攔截用於系統功能（聽寫、emoji），Carbon API 不支援 | 不支援 Fn 單獨觸發，改用 Num Clear 等 standaloneAllowedKeys 白名單內的特殊鍵 |
-| 無 Apple Developer 帳號無法 notarize | 年費 $99 USD | 使用 ad-hoc 簽署，接收方需右鍵 → 打開 → 打開繞過 Gatekeeper |
+| 無 Apple Developer 帳號無法 notarize | 年費 $99 USD | 使用 ad-hoc 簽署，接收方需 `xattr -cr` 或右鍵 → 打開繞過 Gatekeeper |
 
 ## 建置方式
 
@@ -254,9 +280,10 @@ hdiutil create -volname "VoiceInk" -srcfolder dist/dmg-staging -ov -format UDZO 
 
 接收方安裝步驟：
 1. 雙擊 .dmg → 拖 VoiceInk.app 到 Applications
-2. 第一次開啟：右鍵 → 打開 → 打開（繞過 Gatekeeper）
-3. 授權麥克風（系統自動彈出）+ 輔助使用（手動到系統設定加入）
-4. 到 VoiceInk 設定頁面輸入自己的 Groq API Key
+2. 終端機執行 `xattr -cr /Applications/VoiceInk.app`（移除 Gatekeeper 隔離標記）
+3. 雙擊開啟 VoiceInk
+4. 授權麥克風（系統自動彈出）+ 輔助使用（手動到系統設定加入）
+5. 到 VoiceInk 設定頁面輸入自己的 Groq API Key
 
 ## 側邊欄頁面結構
 
