@@ -3,6 +3,7 @@
 
 import Combine
 import Foundation
+import SwiftData
 import SwiftUI
 
 /// 處理狀態
@@ -61,6 +62,12 @@ class TextProcessor: ObservableObject {
 
     private var currentRecordingURL: URL?
     private var cancellables = Set<AnyCancellable>()
+    private var modelContext: ModelContext?
+
+    /// 設定 SwiftData ModelContext（由 View 層注入）
+    func setModelContext(_ context: ModelContext) {
+        self.modelContext = context
+    }
 
     // MARK: - 初始化
 
@@ -193,21 +200,38 @@ class TextProcessor: ObservableObject {
         }
     }
 
-    /// 載入潤飾 Prompt
+    /// 載入潤飾 Prompt（預設規則永遠存在 + 字典 + 使用者額外規則）
     private func loadPrompt() -> String {
-        // 優先使用自訂 Prompt
-        if let customPrompt = UserDefaults.standard.string(forKey: AppSettings.customPrompt),
-           !customPrompt.isEmpty {
-            return customPrompt
-        }
-
-        // 否則使用預設 Prompt
+        // 預設規則（永遠存在）
+        var prompt: String
         if let url = Bundle.main.url(forResource: "DefaultPrompt", withExtension: "txt"),
            let content = try? String(contentsOf: url, encoding: .utf8) {
-            return content
+            prompt = content
+        } else {
+            prompt = "請將以下語音轉錄文字潤飾為繁體中文（台灣用語），修正錯別字並調整語句通順度，直接輸出結果。"
         }
 
-        return "請將以下語音轉錄文字潤飾為繁體中文（台灣用語），修正錯別字並調整語句通順度，直接輸出結果："
+        // 附加字典詞彙
+        let dictionaryWords = loadDictionaryWords()
+        if !dictionaryWords.isEmpty {
+            let wordList = dictionaryWords.joined(separator: "、")
+            prompt += "\n\n【自訂字典】\(wordList)"
+        }
+
+        // 附加使用者額外規則
+        if let customPrompt = UserDefaults.standard.string(forKey: AppSettings.customPrompt),
+           !customPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            prompt += "\n\n【額外規則】\(customPrompt)"
+        }
+
+        return prompt
+    }
+
+    /// 從 SwiftData 載入字典詞彙
+    private func loadDictionaryWords() -> [String] {
+        guard let context = modelContext else { return [] }
+        let descriptor = FetchDescriptor<DictionaryWord>()
+        return (try? context.fetch(descriptor))?.map(\.word) ?? []
     }
 
     /// 取得目前選用的 LLM 提供者

@@ -1,7 +1,6 @@
 # Xcode
-*.xcodeproj/xcuserdata/
-*.xcworkspace/xcuserdata/
-*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+*.xcodeproj/
+*.xcworkspace/
 DerivedData/
 build/
 *.pbxuser
@@ -24,6 +23,9 @@ Package.resolved
 .AppleDouble
 .LSOverride
 ._*
+
+# 打包產出
+dist/
 
 # Claude Code
 .claude/

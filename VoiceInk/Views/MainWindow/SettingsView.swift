@@ -95,9 +95,9 @@ struct SettingsView: View {
 
     private var polishingRulesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("文字潤飾規則", icon: "text.bubble.fill")
+            sectionHeader("額外潤飾規則", icon: "text.bubble.fill")
 
-            Text("定義語音轉文字後的潤飾規則，自訂你想要的輸出風格、格式與語氣。")
+            Text("系統已內建基本潤飾規則（繁體中文、修正錯字、移除贅詞、去除重複語句等）。在此可追加額外的規則，例如特定的語氣、格式或輸出風格。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -110,7 +110,7 @@ struct SettingsView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
 
             HStack {
-                Button("恢復預設規則") {
+                Button("清除額外規則") {
                     settingsViewModel.resetPrompt()
                 }
 

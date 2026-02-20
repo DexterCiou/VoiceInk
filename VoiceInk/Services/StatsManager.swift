@@ -18,6 +18,8 @@ class StatsManager: ObservableObject {
     @Published var todayCharacters: Int = 0
     /// 總轉錄次數
     @Published var totalCount: Int = 0
+    /// 累計總時長
+    @Published var totalDuration: TimeInterval = 0
 
     // MARK: - 私有屬性
 
@@ -134,6 +136,14 @@ class StatsManager: ObservableObject {
         // 總計
         let allDescriptor = FetchDescriptor<TranscriptionRecord>()
         totalCount = (try? context.fetchCount(allDescriptor)) ?? 0
+
+        // 累計總時長（加總所有 DailyStats）
+        let allStatsDescriptor = FetchDescriptor<DailyStats>()
+        if let allStats = try? context.fetch(allStatsDescriptor) {
+            totalDuration = allStats.reduce(0) { $0 + $1.totalDuration }
+        } else {
+            totalDuration = 0
+        }
     }
 
     // MARK: - 私有方法

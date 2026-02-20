@@ -64,6 +64,7 @@ struct AppKeyboardShortcut: Codable, Equatable {
         case kVK_Return: return "↩"
         case kVK_Tab: return "⇥"
         case kVK_Escape: return "⎋"
+        case kVK_ANSI_KeypadClear: return "Num Clear"
         default: return "Key(\(code))"
         }
     }

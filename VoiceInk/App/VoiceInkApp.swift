@@ -16,7 +16,8 @@ struct VoiceInkApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             TranscriptionRecord.self,
-            DailyStats.self
+            DailyStats.self,
+            DictionaryWord.self
         ])
         let modelConfiguration = ModelConfiguration(
             schema: schema,

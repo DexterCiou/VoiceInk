@@ -16,6 +16,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         statsManager: statsManager
     )
 
+    // MARK: - Menu Bar 狀態列圖示
+
+    private var statusItem: NSStatusItem?
+
     // MARK: - 生命週期
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -29,6 +33,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
         }
 
+        // 設定 Menu Bar 狀態列圖示
+        setupStatusBarIcon()
+
         // 檢查權限狀態
         Task {
             let micPermission = await PermissionChecker.checkMicrophonePermission()
@@ -40,6 +47,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     func applicationWillTerminate(_ notification: Notification) {
         hotKeyManager.unregister()
         AppLogger.info("VoiceInk 結束")
+    }
+
+    /// 設定 Menu Bar 狀態列圖示
+    private func setupStatusBarIcon() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        if let button = statusItem?.button {
+            if let image = NSImage(named: "MenuBarIcon") {
+                image.size = NSSize(width: 18, height: 18)
+                button.image = image
+            }
+            button.action = #selector(statusBarIconClicked)
+            button.target = self
+        }
+    }
+
+    /// 點擊 Menu Bar 圖示時顯示主視窗
+    @objc private func statusBarIconClicked() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first(where: { $0.isVisible }) {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            // 如果沒有可見的視窗，嘗試開啟新視窗
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     /// 當使用者點擊 Dock 圖示（如果可見）時重新開啟主視窗

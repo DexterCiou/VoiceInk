@@ -48,7 +48,7 @@ enum AppSettings {
 
         var displayName: String {
             switch self {
-            case .groq: return "Groq（預設，無需額外 API Key）"
+            case .groq: return "Groq（預設）"
             case .claude: return "Claude (Anthropic)"
             case .openai: return "OpenAI GPT"
             }

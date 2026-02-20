@@ -15,10 +15,15 @@ struct DashboardView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
-                // 標題
-                HStack {
+                // 標題與 Logo
+                HStack(spacing: 12) {
+                    Image("AppLogo")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 48, height: 48)
+
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("儀表板")
+                        Text("VoiceInk 聲墨")
                             .font(.largeTitle)
                             .fontWeight(.bold)
                         Text("語音輸入使用概況")
@@ -55,10 +60,10 @@ struct DashboardView: View {
                         color: .green
                     )
                     StatsCardView(
-                        title: "累計轉錄",
-                        value: "\(statsManager.totalCount)",
-                        unit: "次",
-                        icon: "chart.bar.fill",
+                        title: "累計時長",
+                        value: formatTotalDuration(statsManager.totalDuration),
+                        unit: "",
+                        icon: "timer.fill",
                         color: .purple
                     )
                 }
@@ -108,11 +113,25 @@ struct DashboardView: View {
         .disabled(textProcessor.state == .transcribing || textProcessor.state == .processing)
     }
 
-    /// 格式化時長
+    /// 格式化時長（今日）
     private func formatDuration(_ seconds: TimeInterval) -> String {
         let minutes = Int(seconds) / 60
         let secs = Int(seconds) % 60
         if minutes > 0 {
+            return "\(minutes)m \(secs)s"
+        }
+        return "\(secs)s"
+    }
+
+    /// 格式化累計時長（支援小時/分鐘/秒）
+    private func formatTotalDuration(_ seconds: TimeInterval) -> String {
+        let totalSeconds = Int(seconds)
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let secs = totalSeconds % 60
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else if minutes > 0 {
             return "\(minutes)m \(secs)s"
         }
         return "\(secs)s"

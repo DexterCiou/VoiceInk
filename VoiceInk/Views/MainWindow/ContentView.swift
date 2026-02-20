@@ -10,6 +10,7 @@ struct ContentView: View {
 
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var statsManager: StatsManager
+    @EnvironmentObject var textProcessor: TextProcessor
 
     // MARK: - 狀態
 
@@ -28,6 +29,7 @@ struct ContentView: View {
         .frame(minWidth: 800, minHeight: 550)
         .onAppear {
             statsManager.setModelContext(modelContext)
+            textProcessor.setModelContext(modelContext)
         }
         .sheet(isPresented: $showOnboarding) {
             OnboardingView(isPresented: $showOnboarding)
@@ -43,6 +45,8 @@ struct ContentView: View {
             DashboardView()
         case .history:
             HistoryView()
+        case .dictionary:
+            DictionaryView()
         case .settings:
             SettingsView()
         case .about:
@@ -55,6 +59,7 @@ struct ContentView: View {
 enum SidebarTab: String, CaseIterable, Identifiable {
     case dashboard = "儀表板"
     case history = "歷史紀錄"
+    case dictionary = "字典"
     case settings = "設定"
     case about = "關於"
 
@@ -64,6 +69,7 @@ enum SidebarTab: String, CaseIterable, Identifiable {
         switch self {
         case .dashboard: return "chart.bar.fill"
         case .history: return "clock.fill"
+        case .dictionary: return "character.book.closed.fill"
         case .settings: return "gearshape.fill"
         case .about: return "info.circle.fill"
         }
