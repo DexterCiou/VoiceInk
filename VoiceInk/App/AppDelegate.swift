@@ -73,6 +73,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
 
+    /// 防止最後一個視窗關閉時 App 自動退出（ToastWindow 關閉後仍需保持運行）
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return false
+    }
+
     /// 當使用者點擊 Dock 圖示（如果可見）時重新開啟主視窗
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {

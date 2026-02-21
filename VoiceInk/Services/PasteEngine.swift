@@ -111,6 +111,8 @@ class ToastWindow: NSWindow {
         self.hasShadow = true
         self.ignoresMouseEvents = true
         self.collectionBehavior = [.canJoinAllSpaces, .transient]
+        // 防止 close() 時額外 release 造成 ARC 記憶體衝突閃退
+        self.isReleasedWhenClosed = false
 
         let contentView = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight))
         contentView.material = .hudWindow
@@ -136,7 +138,7 @@ class ToastWindow: NSWindow {
 
     func show() {
         self.alphaValue = 0
-        self.makeKeyAndOrderFront(nil)
+        self.orderFront(nil)
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.3
