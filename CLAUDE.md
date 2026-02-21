@@ -119,6 +119,9 @@ VoiceInk/
 | **Combine 轉發巢狀 ObservableObject** | SwiftUI 不會自動偵測巢狀 ObservableObject 的 @Published 變更，需手動轉發 |
 | **繁體中文（台灣用語）** | 使用者明確要求，已寫入預設潤飾規則 |
 | **Ad-hoc 簽署打包** | 無付費 Apple Developer 帳號，使用 `CODE_SIGN_IDENTITY="-"` ad-hoc 簽署 + .dmg 打包分發 |
+| **applicationShouldTerminateAfterLastWindowClosed = false** | ToastWindow 可能是 App 最後一個可見視窗，關閉後 macOS 預設會終止 App，必須回傳 false 保持背景運行 |
+| **isReleasedWhenClosed = false**（ToastWindow） | NSWindow 預設 `isReleasedWhenClosed = true`，`close()` 時會額外 release 一次；在 Swift ARC 下造成 over-release 閃退（動畫 completionHandler 仍持有 self 參考時 window 已被釋放） |
+| **orderFront 而非 makeKeyAndOrderFront**（ToastWindow） | Toast 通知不需要成為 key window，borderless window 的 `canBecomeKey` 回傳 false 會導致 `makeKeyWindow` 警告 |
 
 ## SPM 依賴
 
@@ -198,12 +201,17 @@ VoiceInk/
 - 前台 App 不是 VoiceInk → 模擬 ⌘V 自動貼上
 - 前台 App 是 VoiceInk 或無目標 → 顯示 ToastWindow 浮動通知「已複製到剪貼簿」
 - ToastWindow：NSWindow borderless，NSVisualEffectView hudWindow 材質，2 秒後淡出
+- **ToastWindow 關鍵設定**（防閃退）：
+  - `isReleasedWhenClosed = false`：防止 `close()` 額外 release 與 ARC 衝突
+  - `orderFront(nil)` 而非 `makeKeyAndOrderFront`：Toast 不需成為 key window
+  - dismissTimer 使用 `[weak self]` 避免循環參考
 
 ### AppDelegate
 - `@MainActor class`（解決 nonisolated context 初始化 @MainActor 物件的編譯錯誤）
 - 擁有 `hotKeyManager`、`statsManager`、`settingsViewModel`、`textProcessor`、`statusItem`
 - 透過 `@NSApplicationDelegateAdaptor` 注入 SwiftUI App
 - `applicationDidFinishLaunching` 中初始化：快捷鍵註冊、Menu Bar 圖示、權限檢查
+- `applicationShouldTerminateAfterLastWindowClosed` 回傳 `false`：防止 ToastWindow 關閉後 App 自動退出（此 App 依賴 Menu Bar 常駐背景運行）
 
 ### Keychain
 - 開發期間每次 Xcode 重編會產生新 binary，macOS 會彈出 Keychain 存取確認（正式簽名後不會）
@@ -234,6 +242,8 @@ VoiceInk/
 | SwiftUI onKeyPress 無法捕捉特殊鍵 | `onKeyPress` 只能接收字母/數字等標準按鍵 | 改用 `NSEvent.addLocalMonitorForEvents(matching: .keyDown)` 直接取得 raw keyCode |
 | Fn 鍵無法作為全域快捷鍵 | Fn/🌐 是硬體層級修飾鍵，macOS 攔截用於系統功能（聽寫、emoji），Carbon API 不支援 | 不支援 Fn 單獨觸發，改用 Num Clear 等 standaloneAllowedKeys 白名單內的特殊鍵 |
 | 無 Apple Developer 帳號無法 notarize | 年費 $99 USD | 使用 ad-hoc 簽署，接收方需 `xattr -cr` 或右鍵 → 打開繞過 Gatekeeper |
+| **ToastWindow 關閉後 App 閃退**（已修復） | 兩個原因疊加：(1) ToastWindow 是最後一個可見視窗，`close()` 後 macOS 認為沒有視窗而終止 App；(2) NSWindow 預設 `isReleasedWhenClosed = true`，`close()` 額外 release 與 ARC 自動 release 衝突導致 over-release | **(1)** AppDelegate 加入 `applicationShouldTerminateAfterLastWindowClosed` 回傳 `false`；**(2)** ToastWindow init 設定 `isReleasedWhenClosed = false`；**(3)** `makeKeyAndOrderFront` 改為 `orderFront`（一併修復 `canBecomeKeyWindow` 警告） |
+| **`-[NSWindow makeKeyWindow]` 警告**（已修復） | ToastWindow 使用 `.borderless` styleMask，`canBecomeKey` 回傳 false，但 `makeKeyAndOrderFront` 仍嘗試 makeKey | 改用 `orderFront(nil)`，Toast 通知不需要成為 key window |
 
 ## 建置方式
 
@@ -300,7 +310,7 @@ hdiutil create -volname "VoiceInk" -srcfolder dist/dmg-staging -ov -format UDZO 
 ### 高優先
 - [ ] **錯誤處理改善**：STT/LLM 失敗時在 UI 上顯示具體錯誤訊息，而非只在 console log
 - [ ] **歷史紀錄修復**：確認每次轉錄都正確寫入 SwiftData（目前偶爾漏存）
-- [ ] **ToastWindow 警告修復**：`-[NSWindow makeKeyWindow]` on ToastWindow 報錯（canBecomeKeyWindow 回傳 NO）
+- [x] **ToastWindow 閃退與警告修復**：已修復 `close()` 後 App 閃退（`applicationShouldTerminateAfterLastWindowClosed` + `isReleasedWhenClosed`）及 `makeKeyWindow` 警告（改用 `orderFront`）
 
 ### 中優先
 - [ ] **自動貼上強化**：偵測前台 App 是否有可輸入的文字欄位（AXUIElement API）
