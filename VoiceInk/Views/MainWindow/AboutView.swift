@@ -52,8 +52,6 @@ struct AboutView: View {
             VStack(spacing: 6) {
                 infoRow("系統需求", value: "macOS 14.0 (Sonoma) 或更新版本")
                 infoRow("開發框架", value: "SwiftUI + SwiftData")
-                infoRow("語音辨識", value: "Groq Whisper API")
-                infoRow("文字潤飾", value: "Claude / OpenAI")
             }
             .padding()
             .background(.regularMaterial)
