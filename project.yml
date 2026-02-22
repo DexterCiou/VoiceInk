@@ -19,9 +19,6 @@ packages:
   HotKey:
     url: https://github.com/soffes/HotKey
     from: "0.2.1"
-  KeychainAccess:
-    url: https://github.com/kishikawakatsumi/KeychainAccess
-    from: "4.2.2"
   LaunchAtLogin:
     url: https://github.com/sindresorhus/LaunchAtLogin-Modern
     from: "1.1.0"
@@ -52,5 +49,4 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     dependencies:
       - package: HotKey
-      - package: KeychainAccess
       - package: LaunchAtLogin
