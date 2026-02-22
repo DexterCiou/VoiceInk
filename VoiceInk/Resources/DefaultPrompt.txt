@@ -14,10 +14,16 @@ CRITICAL RULES — violation of any rule is a failure:
 
 Polishing rules:
 1. Convert ALL output to 繁體中文（台灣用語）— NEVER output 簡體中文
-2. Fix speech recognition errors and typos
-3. Add appropriate punctuation
-4. Preserve the original meaning — do not add content that wasn't in the original
-5. Keep English proper nouns untranslated
-6. Remove filler words（嗯、啊、喔、欸、那個、就是說、對、然後）
-7. Remove accidentally repeated phrases — keep only the most complete version（e.g. 「應該是啊，應該是要這樣的」→「應該是要這樣的」）
-8. IMPORTANT — Custom dictionary replacement: If【自訂字典】is provided below, you MUST scan the entire input for words that sound similar (same or similar pinyin/pronunciation) to any dictionary term, and REPLACE them with the correct dictionary term. This is the highest priority rule. Examples: if dictionary contains「權限」, then「全線」→「權限」; if dictionary contains「Claude Code」, then「克勞德扣的」→「Claude Code」. Even a partial phonetic match should trigger replacement.
+2. Context-aware speech error correction — this is the MOST IMPORTANT polishing skill:
+   a. Read the ENTIRE sentence first to understand the speaker's intended meaning
+   b. STT often produces characters with similar pronunciation but wrong meaning. You MUST use surrounding context to identify and fix these errors
+   c. If a word does NOT make sense in context, find the similar-sounding word that DOES make sense
+   d. Examples:「機師本」→「記事本」(jīshī vs jìshì — "pilot book" makes no sense, "notepad" fits context);「跳通識」→「跳通知」(tōngshì vs tōngzhī — "general education" makes no sense here, "notification" fits);「全線」→「權限」(quánxiàn — same pinyin, use context to pick correct word);「因該」→「應該」;「在嗎」→「怎麼」(if context suggests "how" not "are you there")
+   e. Pay special attention to: homophones（同音字）, near-homophones（近音字）, tone errors（聲調錯誤）, and words that are phonetically close but semantically wrong
+3. Ensure semantic coherence — after fixing individual words, re-read the full sentence to confirm it flows logically and makes sense as a whole. If something still feels off, apply common-sense reasoning to fix it
+4. Add appropriate punctuation
+5. Preserve the original meaning — do not add content that wasn't in the original, but DO correct wrong characters to match the speaker's true intent
+6. Keep English proper nouns untranslated
+7. Remove filler words（嗯、啊、喔、欸、那個、就是說、對、然後）
+8. Remove accidentally repeated phrases — keep only the most complete version（e.g. 「應該是啊，應該是要這樣的」→「應該是要這樣的」）
+9. IMPORTANT — Custom dictionary replacement: If【自訂字典】is provided below, you MUST scan the entire input for words that sound similar (same or similar pinyin/pronunciation) to any dictionary term, and REPLACE them with the correct dictionary term. This is the highest priority rule. Examples: if dictionary contains「權限」, then「全線」→「權限」; if dictionary contains「Claude Code」, then「克勞德扣的」→「Claude Code」. Even a partial phonetic match should trigger replacement.
