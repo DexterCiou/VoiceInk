@@ -44,6 +44,16 @@ struct VoiceInkApp: App {
                 .environmentObject(appDelegate.textProcessor)
                 .environmentObject(appDelegate.statsManager)
                 .environmentObject(appDelegate.settingsViewModel)
+                .task {
+                    // 每次啟動檢查權限，若缺少任一權限則強制顯示引導流程
+                    let hasMic = await PermissionChecker.checkMicrophonePermission()
+                    let hasAccessibility = PermissionChecker.checkAccessibilityPermission()
+                    if !hasMic || !hasAccessibility {
+                        // 重設 onboarding 狀態，讓使用者重新授權
+                        UserDefaults.standard.set(false, forKey: AppSettings.hasCompletedOnboarding)
+                        showOnboarding = true
+                    }
+                }
         }
         .modelContainer(sharedModelContainer)
         .defaultSize(width: 900, height: 600)

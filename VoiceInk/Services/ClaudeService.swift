@@ -37,7 +37,7 @@ class ClaudeService: LLMProvider {
             max_tokens: 4096,
             system: prompt,
             messages: [
-                ClaudeMessage(role: "user", content: text)
+                ClaudeMessage(role: "user", content: "<transcription>\(text)</transcription>")
             ]
         )
 

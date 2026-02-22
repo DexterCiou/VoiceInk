@@ -34,7 +34,7 @@ class OpenAIService: LLMProvider {
             model: modelName,
             messages: [
                 OpenAIMessage(role: "system", content: prompt),
-                OpenAIMessage(role: "user", content: text)
+                OpenAIMessage(role: "user", content: "<transcription>\(text)</transcription>")
             ],
             max_tokens: 4096,
             temperature: 0.1

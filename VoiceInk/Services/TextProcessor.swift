@@ -171,7 +171,17 @@ class TextProcessor: ObservableObject {
         let provider = currentLLMProvider()
 
         do {
-            finalText = try await provider.process(text: transcriptionResult.text, prompt: prompt)
+            let rawLLMResult = try await provider.process(text: transcriptionResult.text, prompt: prompt)
+            let strippedResult = stripAIPrefix(rawLLMResult)
+
+            // 相似度檢查：若 LLM 輸出與原文完全無關，退回使用 STT 原文
+            if isLLMOutputValid(original: transcriptionResult.text, llmOutput: strippedResult) {
+                finalText = strippedResult
+            } else {
+                AppLogger.warning("LLM 輸出與原文無關，退回使用 STT 原文。LLM 輸出：\(strippedResult)")
+                // 退回 STT 原文，但仍做基本繁體轉換
+                finalText = transcriptionResult.text
+            }
             llmModel = provider.modelName
         } catch {
             // LLM 失敗時仍使用原始 STT 結果
@@ -224,6 +234,9 @@ class TextProcessor: ObservableObject {
         if !dictionaryWords.isEmpty {
             let wordList = dictionaryWords.joined(separator: "、")
             prompt += "\n\n【自訂字典】\(wordList)"
+            AppLogger.info("已載入 \(dictionaryWords.count) 個字典詞彙：\(wordList)")
+        } else {
+            AppLogger.info("字典詞彙為空（modelContext 是否已注入：\(modelContext != nil)）")
         }
 
         // 附加使用者額外規則
@@ -233,6 +246,72 @@ class TextProcessor: ObservableObject {
         }
 
         return prompt
+    }
+
+    /// 移除 LLM 可能附帶的對話性前綴（如「好的，以下是…」）
+    private func stripAIPrefix(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 常見 AI 對話性前綴模式
+        let prefixPatterns = [
+            // 中文前綴
+            "^好的[，,。：:！!]?\\s*",
+            "^以下是[^：:]*[：:]\\s*",
+            "^好的[，,]?以下是[^：:]*[：:]\\s*",
+            "^沒問題[，,。：:！!]?\\s*",
+            "^當然[，,。：:！!]?\\s*",
+            "^好[，,]?這是[^：:]*[：:]\\s*",
+            "^以下為[^：:]*[：:]\\s*",
+            "^潤飾後的文字[：:]\\s*",
+            "^修正後[的之]?文字[：:]\\s*",
+            "^經過潤飾[，,]?\\s*",
+            // 英文前綴
+            "^(?i)here\\s*(is|are)[^:：]*[：:]\\s*",
+            "^(?i)sure[,，!！.]?\\s*",
+            "^(?i)of course[,，!！.]?\\s*",
+        ]
+
+        var result = trimmed
+        for pattern in prefixPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern),
+               let match = regex.firstMatch(in: result, range: NSRange(result.startIndex..., in: result)) {
+                let matchRange = Range(match.range, in: result)!
+                result = String(result[matchRange.upperBound...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                AppLogger.info("已移除 LLM 對話性前綴：\(String(trimmed.prefix(30)))...")
+                break
+            }
+        }
+
+        // 移除可能的包裹引號（「…」或 "…"）
+        if (result.hasPrefix("「") && result.hasSuffix("」")) ||
+           (result.hasPrefix("\"") && result.hasSuffix("\"")) {
+            result = String(result.dropFirst().dropLast())
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return result
+    }
+
+    /// 檢查 LLM 輸出是否與原文相關（防止 LLM 自行回覆而非潤飾）
+    /// 比較原文與 LLM 輸出的字元重疊度，過低表示 LLM 沒有在潤飾而是在「回答」
+    private func isLLMOutputValid(original: String, llmOutput: String) -> Bool {
+        // 短文本放寬檢查（5 字以內的原文本身變化空間就大）
+        if original.count <= 5 { return true }
+
+        // 取出原文中的中文字元集合（去掉標點、空白）
+        let originalChars = Set(original.unicodeScalars.filter { CharacterSet.letters.contains($0) }.map { Character($0) })
+        let outputChars = Set(llmOutput.unicodeScalars.filter { CharacterSet.letters.contains($0) }.map { Character($0) })
+
+        // 計算交集比例：原文字元有多少出現在 LLM 輸出中
+        guard !originalChars.isEmpty else { return true }
+        let intersection = originalChars.intersection(outputChars)
+        let overlapRatio = Double(intersection.count) / Double(originalChars.count)
+
+        AppLogger.info("相似度檢查：原文 \(originalChars.count) 字元，重疊 \(intersection.count)，比例 \(String(format: "%.2f", overlapRatio))")
+
+        // 重疊度低於 30% 視為 LLM 自行回覆
+        return overlapRatio >= 0.3
     }
 
     /// 從 SwiftData 載入字典詞彙

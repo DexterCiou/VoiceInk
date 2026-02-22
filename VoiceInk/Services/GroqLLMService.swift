@@ -34,7 +34,7 @@ class GroqLLMService: LLMProvider {
             model: modelName,
             messages: [
                 GroqChatMessage(role: "system", content: prompt),
-                GroqChatMessage(role: "user", content: text)
+                GroqChatMessage(role: "user", content: "<transcription>\(text)</transcription>")
             ],
             max_tokens: 4096,
             temperature: 0.1
