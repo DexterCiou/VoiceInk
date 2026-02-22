@@ -41,6 +41,10 @@ struct SettingsView: View {
             }
             .padding(24)
         }
+        .onAppear {
+            // 重新載入 API Key（onboarding 完成後可能已新增）
+            settingsViewModel.loadAPIKeys()
+        }
     }
 
     // MARK: - API Key 區塊
