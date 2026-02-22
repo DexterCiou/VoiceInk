@@ -8,7 +8,7 @@ macOS 原生語音輸入應用程式。使用者按下全域快捷鍵（預設 �
 - **語言**: Swift 5.9，註解全部使用繁體中文
 - **最低系統需求**: macOS 14.0（Sonoma）
 - **建置工具**: xcodegen（從 `project.yml` 生成 `.xcodeproj`）
-- **目前版本**: 1.0.0
+- **目前版本**: 1.1.2
 - **架構**: arm64（Apple Silicon）
 
 ## 核心流程
@@ -18,9 +18,13 @@ macOS 原生語音輸入應用程式。使用者按下全域快捷鍵（預設 �
 → Groq Whisper STT（語音轉文字）
 → 檢查 STT 結果（不到 2 字則跳過，不送 LLM）
 → LLM 文字潤飾（預設 Groq Llama 3.3 70B，temperature 0.1）
-  ├── 預設規則永遠生效（英文指令 + 繁中潤飾規則）
+  ├── 預設規則永遠生效（英文指令 + 繁中潤飾規則，共 9 條）
+  ├── user message 用 <transcription> XML 標籤包裹（防止 LLM 把輸入當指令）
   ├── 自訂字典詞彙自動帶入（提升專有名詞辨識）
   └── 使用者額外規則追加（如有設定）
+→ LLM 輸出後處理
+  ├── stripAIPrefix()：移除常見 AI 對話性前綴（「好的」「以下是」等）
+  └── isLLMOutputValid()：相似度檢查，LLM 輸出與原文字元重疊度 < 30% 則退回 STT 原文
 → 自動貼上到目前焦點的 App（或複製到剪貼簿 + 浮動通知）
 ```
 
@@ -64,7 +68,7 @@ VoiceInk/
     │   └── StatsManager.swift         # SwiftData CRUD，統計查詢（含 totalDuration）
     │
     ├── Utilities/
-    │   ├── KeychainHelper.swift       # KeychainAccess 套件封裝
+    │   ├── KeychainHelper.swift       # CryptoKit AES-GCM 加密檔案儲存 API Key（不使用 macOS Keychain）
     │   ├── Logger.swift               # os.log 統一日誌（AppLogger）
     │   ├── PermissionChecker.swift    # 麥克風 + 輔助使用權限檢查/請求
     │   └── SoundPlayer.swift          # NSSound 系統音效（Tink/Pop/Glass/Basso）
@@ -92,7 +96,7 @@ VoiceInk/
     │       └── MenuBarView.swift          # 目前未使用（MenuBarExtra 有問題，改用 NSStatusBar）
     │
     └── Resources/
-        └── DefaultPrompt.txt          # 預設潤飾規則（英文指令框架 + 8 條潤飾規則，永遠生效）
+        └── DefaultPrompt.txt          # 預設潤飾規則（英文指令框架 + 9 條潤飾規則，永遠生效）
 ```
 
 ## 技術決策與原因
@@ -122,14 +126,22 @@ VoiceInk/
 | **applicationShouldTerminateAfterLastWindowClosed = false** | ToastWindow 可能是 App 最後一個可見視窗，關閉後 macOS 預設會終止 App，必須回傳 false 保持背景運行 |
 | **isReleasedWhenClosed = false**（ToastWindow） | NSWindow 預設 `isReleasedWhenClosed = true`，`close()` 時會額外 release 一次；在 Swift ARC 下造成 over-release 閃退（動畫 completionHandler 仍持有 self 參考時 window 已被釋放） |
 | **orderFront 而非 makeKeyAndOrderFront**（ToastWindow） | Toast 通知不需要成為 key window，borderless window 的 `canBecomeKey` 回傳 false 會導致 `makeKeyWindow` 警告 |
+| **XML 標籤包裹 user message** | 用 `<transcription>原文</transcription>` 標記輸入為「資料」非「指令」，防止 LLM 把語音原文當成對它的指令去回答（如「請幫我優化」→ LLM 回覆「沒問題」）。這是業界常用的防 prompt injection 技巧 |
+| **LLM 輸出後處理（stripAIPrefix + isLLMOutputValid）** | 三層防護：(1) prompt 禁止 (2) 後處理移除 AI 前綴 (3) 相似度檢查保底。即使 Groq 免費模型偶爾無視指令，也能自動修正 |
+| **CryptoKit AES-GCM 加密檔案取代 Keychain** | macOS Keychain 的 ACL 機制會綁定 App 簽名，ad-hoc 簽署每次重裝都彈密碼視窗。Data Protection Keychain 需要 entitlement（ad-hoc 不支援，OSStatus -34018）。改用加密檔案存在 `~/Library/Application Support/VoiceInk/` 徹底解決 |
+| **自簽名憑證（VoiceInk Developer）** | 建立 10 年效期的自簽名 code signing 憑證，build 後用 `codesign --force --deep --sign` 重簽。簽名固定後，macOS 不會每次都認為是不同 App |
+| **啟動時強制權限檢查** | 刪除重裝後 UserDefaults 可能殘留 `hasCompletedOnboarding=true`，但權限已失效。改為每次啟動都檢查麥克風 + 輔助使用權限，缺少就重設 onboarding |
+| **語意感知語音糾錯（prompt rule 2）** | STT 常產生同音字/近音字錯誤（如「機師本」→「記事本」），單純「修正錯字」太模糊，改為要求 LLM 先讀完整句理解語意再修正，並給具體範例 |
+| **禁止 LLM 擴充原文** | Groq Llama 會自行補充句子「強化」使用者的話。在 prompt 明確禁止附加額外句子，允許 3-5 字潤飾落差但不允許新增整句 |
 
 ## SPM 依賴
 
 | 套件 | 用途 |
 |------|------|
 | [HotKey](https://github.com/soffes/HotKey) ^0.2.1 | 全域快捷鍵註冊 |
-| [KeychainAccess](https://github.com/kishikawakatsumi/KeychainAccess) ^4.2.2 | API Key 安全儲存 |
 | [LaunchAtLogin](https://github.com/sindresorhus/LaunchAtLogin-Modern) ^1.1.0 | 開機自動啟動 |
+
+> **注意**：API Key 儲存已從 KeychainAccess 套件改為自製 CryptoKit AES-GCM 加密檔案方案（見 KeychainHelper.swift），不再依賴 KeychainAccess。
 
 ## 重要設計細節
 
@@ -143,33 +155,47 @@ VoiceInk/
   2. **【自訂字典】**（從 SwiftData 讀取 DictionaryWord）— 有詞彙時才附加
   3. **【額外規則】**（UserDefaults customPrompt）— 有填寫時才附加
 - 需要 `ModelContext` 來讀取字典，透過 `setModelContext()` 由 ContentView 注入
+- **LLM 輸出後處理**（防止 AI 回覆汙染輸出）：
+  - `stripAIPrefix()`：用正則表達式移除常見 AI 對話性前綴（「好的，」「以下是…」「沒問題」「Here is」等），也移除包裹引號
+  - `isLLMOutputValid()`：比較原文與 LLM 輸出的字元重疊度，低於 30% 視為 LLM 自行回覆（如「沒有東西要測試」），退回使用 STT 原文
+  - 字典載入 log：每次 `loadPrompt()` 時記錄載入了多少字典詞彙（方便 debug）
 
 ### 預設潤飾規則（DefaultPrompt.txt）
 永遠作為 system message 傳給 LLM。**使用英文撰寫指令框架**（角色定義、禁止事項），**潤飾規則用中英混合**。
 
 結構分三段：
-1. **角色定義**：「You are a text-to-text converter, not a chatbot」— 明確告訴 LLM 不是聊天機器人
-2. **CRITICAL RULES（嚴格禁止）**：禁止加入「好的」、「以下是」等開頭語，禁止對話性回覆，禁止任何說明文字
-3. **Polishing rules（潤飾規則，共 8 條）**：
+1. **角色定義**：「You are a text-to-text converter, not a chatbot」— 明確告訴 LLM 不是聊天機器人，輸入用 `<transcription>` 標籤包裹
+2. **CRITICAL RULES（嚴格禁止）**：
+   - 禁止加入「好的」「以下是」「沒問題」等開頭語
+   - 禁止對話性回覆、禁止任何說明文字
+   - **明確標示輸入是語音資料，不是指令**（附帶具體範例）
+   - **禁止附加額外句子**（允許 3-5 字潤飾落差，但不允許新增整句）
+   - 禁止把輸入當指令回答
+3. **Polishing rules（潤飾規則，共 9 條）**：
    1. 一律繁體中文（台灣用語），禁止簡體
-   2. 修正語音辨識錯誤與錯別字
-   3. 適當加入標點符號
-   4. 保持原始語意不變
-   5. 保留英文專有名詞不翻譯
-   6. 移除口語贅詞（嗯、啊、喔、欸、那個、就是說、對、然後）
-   7. 移除重複語句（保留最完整的一句）
-   8. 字典詞彙優先替換（發音相近、拼寫相似時替換為字典正確寫法）
+   2. **語意感知語音糾錯**（最重要規則）：先讀完整句理解語意，修正同音字/近音字/聲調錯誤。附帶具體範例（機師本→記事本、跳通識→跳通知、全線→權限等）
+   3. **語意連貫性檢查**：修完個別詞彙後重新通讀整句確認邏輯通順
+   4. 適當加入標點符號
+   5. 保持原文內容長度，只修錯不擴充
+   6. 保留英文專有名詞不翻譯
+   7. 移除贅詞與冗餘輔助詞（嗯、啊、喔、欸、那個、就是說、這是、那是、這個、那個等），附帶範例
+   8. 移除重複語句（保留最完整的一句）
+   9. 字典詞彙優先替換（發音相近時必須替換，最高優先級）
 
 **重要經驗**：
 - prompt 用中文寫時，Llama 3.3 70B 容易忽略「直接輸出」的指令，改用英文後遵從度大幅提升
-- user message 不要加指令性前綴（如「請將以下文字潤飾」），只傳原始文字，否則 LLM 會以對話模式回覆
+- user message 用 `<transcription>` XML 標籤包裹，明確區分「資料」與「指令」，大幅減少 LLM 把輸入當指令回答的情況
+- user message 不要加指令性前綴（如「請將以下文字潤飾」），否則 LLM 會以對話模式回覆
 - temperature 必須設 0.1（不是 0.3），越低 LLM 越嚴格遵守格式指令
+- 必須在 prompt 給具體的語音糾錯範例（附拼音對照），否則 LLM 不知道怎麼修同音字
+- 贅詞清單要明確列舉，LLM 才會主動刪除（口語中的「這是」「那個」等冗餘輔助詞）
 
 ### LLM 服務共通設定
-- **GroqLLMService**：Llama 3.3 70B，temperature 0.1，user message 只傳原始文字
-- **ClaudeService**：claude-sonnet-4-20250514，user message 只傳原始文字
-- **OpenAIService**：gpt-4o-mini，temperature 0.1，user message 只傳原始文字
-- 三個服務的 `process(text:prompt:)` 都是 system=prompt、user=text（純文字，無前綴）
+- **GroqLLMService**：Llama 3.3 70B，temperature 0.1
+- **ClaudeService**：claude-sonnet-4-20250514
+- **OpenAIService**：gpt-4o-mini，temperature 0.1
+- 三個服務的 `process(text:prompt:)` 都是 system=prompt、user=`<transcription>原文</transcription>`
+- user message 用 XML 標籤包裹，讓 LLM 明確知道這是要潤飾的資料，不是對它的指令
 
 ### 字典功能（DictionaryWord + DictionaryView）
 - `DictionaryWord`：SwiftData @Model，儲存 `word`（詞彙）和 `createdAt`（建立時間）
@@ -213,9 +239,16 @@ VoiceInk/
 - `applicationDidFinishLaunching` 中初始化：快捷鍵註冊、Menu Bar 圖示、權限檢查
 - `applicationShouldTerminateAfterLastWindowClosed` 回傳 `false`：防止 ToastWindow 關閉後 App 自動退出（此 App 依賴 Menu Bar 常駐背景運行）
 
-### Keychain
-- 開發期間每次 Xcode 重編會產生新 binary，macOS 會彈出 Keychain 存取確認（正式簽名後不會）
-- 儲存 3 組 Key：`groq_api_key`（必填）、`claude_api_key`、`openai_api_key`
+### API Key 安全儲存（KeychainHelper.swift）
+- **不使用 macOS Keychain**（ACL 密碼彈窗問題無法在 ad-hoc 簽署下解決）
+- 改用 **CryptoKit AES-GCM 加密檔案**，存在 `~/Library/Application Support/VoiceInk/`
+- 加密金鑰從固定種子 `"com.voiceink.VoiceInk.secure.storage.v1"` 經 SHA256 衍生
+- 每個 Key 一個 `.enc` 檔案：`groq_api_key.enc`、`claude_api_key.enc`、`openai_api_key.enc`
+- 介面保持 `save/load/delete/exists` 不變，其他程式碼無需改動
+- **曾嘗試的方案**：
+  - KeychainAccess 套件 → ACL 綁定簽名，每次重裝彈密碼 ❌
+  - Security framework + `kSecUseDataProtectionKeychain` → 需要 entitlement，ad-hoc 不支援（OSStatus -34018）❌
+  - CryptoKit AES-GCM 加密檔案 → 完全不依賴 Keychain，徹底解決 ✅
 
 ### 統計功能
 - `StatsManager`：`totalDuration` 加總所有 DailyStats 的 `totalDuration`
@@ -228,7 +261,7 @@ VoiceInk/
 |------|------|----------|
 | MenuBarExtra 圖示不顯示 | 原因未明，可能與 Xcode 26.2 或 SwiftUI Scene 衝突有關 | **改用 NSStatusBar API**，在 AppDelegate 中直接建立狀態列圖示 |
 | 每次 Xcode 重編後輔助使用權限被撤銷 | macOS 以 binary 簽名判斷身份，debug build 每次簽名不同 | 開發期間需手動重新開啟（路徑：`~/Library/Developer/Xcode/DerivedData/VoiceInk-xxx/Build/Products/Debug/VoiceInk.app`）；正式 code sign 後不會發生 |
-| 每次 Xcode 重編後 Keychain 存取需確認密碼 | 同上，binary 簽名變更 | 點「永遠允許」；正式簽名後不會發生 |
+| ~~每次 Xcode 重編後 Keychain 存取需確認密碼~~（已修復） | ~~binary 簽名變更~~ | **已改用 CryptoKit AES-GCM 加密檔案**，完全不使用 macOS Keychain |
 | Groq Whisper 輸出簡體中文 | Whisper 模型預設行為 | 在 LLM 預設潤飾規則強制「Convert ALL output to 繁體中文 — NEVER output 簡體中文」 |
 | LLM 輸出對話性回覆（「好的，以下是…」） | 中文 system prompt 對 Llama 3.3 70B 的約束力不足，LLM 把自己當聊天機器人 | **改用英文寫 system prompt**（角色定義 + CRITICAL RULES 禁止事項），user message 只傳原始文字不加指令前綴 |
 | LLM 仍輸出簡體中文 | temperature 0.3 太高，LLM 遵從指令的確定性不夠 | **降低 temperature 到 0.1**（Groq + OpenAI 都改了） |
@@ -244,6 +277,13 @@ VoiceInk/
 | 無 Apple Developer 帳號無法 notarize | 年費 $99 USD | 使用 ad-hoc 簽署，接收方需 `xattr -cr` 或右鍵 → 打開繞過 Gatekeeper |
 | **ToastWindow 關閉後 App 閃退**（已修復） | 兩個原因疊加：(1) ToastWindow 是最後一個可見視窗，`close()` 後 macOS 認為沒有視窗而終止 App；(2) NSWindow 預設 `isReleasedWhenClosed = true`，`close()` 額外 release 與 ARC 自動 release 衝突導致 over-release | **(1)** AppDelegate 加入 `applicationShouldTerminateAfterLastWindowClosed` 回傳 `false`；**(2)** ToastWindow init 設定 `isReleasedWhenClosed = false`；**(3)** `makeKeyAndOrderFront` 改為 `orderFront`（一併修復 `canBecomeKeyWindow` 警告） |
 | **`-[NSWindow makeKeyWindow]` 警告**（已修復） | ToastWindow 使用 `.borderless` styleMask，`canBecomeKey` 回傳 false，但 `makeKeyAndOrderFront` 仍嘗試 makeKey | 改用 `orderFront(nil)`，Toast 通知不需要成為 key window |
+| **LLM 把語音原文當指令回答**（已修復） | 使用者說「請幫我優化以上問題」→ LLM 回覆「沒有問題讓我優化」而非潤飾原文 | 三層防護：(1) XML 標籤包裹 (2) prompt 明確禁止 + 範例 (3) 相似度檢查保底（`isLLMOutputValid`） |
+| **LLM 自行補充額外句子**（已修復） | LLM 在潤飾後自行附加「他應該可以更好地理解我的語音…」等補充句 | prompt 新增禁止附加額外句子規則，允許 3-5 字落差但不允許新增整句 |
+| **Keychain 密碼彈窗（ad-hoc 簽署）**（已修復） | macOS Keychain ACL 綁定 App 簽名，ad-hoc 每次重裝都彈 | 改用 CryptoKit AES-GCM 加密檔案，完全不使用 Keychain |
+| **kSecUseDataProtectionKeychain OSStatus -34018** | Data Protection Keychain 需要 `com.apple.application-identifier` entitlement，ad-hoc 簽署不支援 | 放棄此方案，改用加密檔案 |
+| **重裝後不顯示權限引導**（已修復） | UserDefaults `hasCompletedOnboarding` 在刪除 App 後可能殘留 | 每次啟動都檢查麥克風 + 輔助使用權限，缺少就重設 onboarding |
+| **字典功能不生效**（已加強） | 字典有載入但 LLM 對「發音相近替換」指令不夠明確 | 強化 prompt rule 9，明確要求掃描全文做發音比對替換，附範例 |
+| **STT 同音字/近音字錯誤**（已加強） | Whisper 常產生發音相近但意思錯誤的字（機師本→記事本） | prompt rule 2 大幅強化為語意感知糾錯，附拼音對照範例 |
 
 ## 建置方式
 
@@ -265,7 +305,7 @@ open VoiceInk.xcodeproj
 
 **注意**：新增 Swift 檔案後必須執行 `xcodegen generate` 重新生成專案，否則 Xcode 找不到新檔案。
 
-## 打包分發（Ad-hoc，無需 Developer 帳號）
+## 打包分發（自簽名憑證，無需 Developer 帳號）
 
 ```bash
 cd "/Users/dexterciou/Documents/claude code/VoiceInk"
@@ -273,20 +313,29 @@ cd "/Users/dexterciou/Documents/claude code/VoiceInk"
 # 1. 生成專案
 /opt/homebrew/bin/xcodegen generate
 
-# 2. Release 建置（ad-hoc 簽署）
+# 2. Clean build Release（ad-hoc 簽署）
+rm -rf build
 xcodebuild -project VoiceInk.xcodeproj -scheme VoiceInk -configuration Release \
   -derivedDataPath build \
   CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=YES CODE_SIGNING_ALLOWED=YES \
   ENABLE_HARDENED_RUNTIME=YES
 
-# 3. 打包 .dmg
+# 3. 用自簽名憑證重新簽名（固定簽名，避免 Keychain 彈窗）
+codesign --force --deep --sign "VoiceInk Developer" "build/Build/Products/Release/VoiceInk.app"
+
+# 4. 刪除舊版 .dmg + 打包新版（版本號每次遞增）
+rm -f dist/VoiceInk-*.dmg
 rm -rf dist/dmg-staging && mkdir -p dist/dmg-staging
 cp -R "build/Build/Products/Release/VoiceInk.app" dist/dmg-staging/
 ln -sf /Applications dist/dmg-staging/Applications
-hdiutil create -volname "VoiceInk" -srcfolder dist/dmg-staging -ov -format UDZO "dist/VoiceInk-1.0.0.dmg"
+hdiutil create -volname "VoiceInk" -srcfolder dist/dmg-staging -ov -format UDZO "dist/VoiceInk-X.X.X.dmg"
 ```
 
-產出 .dmg 位置：`dist/VoiceInk-1.0.0.dmg`（目前僅 arm64 Apple Silicon）
+- 產出 .dmg 位置：`dist/VoiceInk-X.X.X.dmg`（目前僅 arm64 Apple Silicon）
+- **目前最新版本**：`VoiceInk-1.1.2.dmg`
+- **版本號規則**：每次打包遞增（如 1.1.2 → 1.1.3），舊版 .dmg 自動刪除
+- **自簽名憑證**：`VoiceInk Developer`（10 年效期），已安裝在 login keychain
+- **重要**：必須 `rm -rf build` clean build，否則可能用到舊的編譯快取
 
 接收方安裝步驟：
 1. 雙擊 .dmg → 拖 VoiceInk.app 到 Applications
@@ -310,7 +359,14 @@ hdiutil create -volname "VoiceInk" -srcfolder dist/dmg-staging -ov -format UDZO 
 ### 高優先
 - [ ] **錯誤處理改善**：STT/LLM 失敗時在 UI 上顯示具體錯誤訊息，而非只在 console log
 - [ ] **歷史紀錄修復**：確認每次轉錄都正確寫入 SwiftData（目前偶爾漏存）
-- [x] **ToastWindow 閃退與警告修復**：已修復 `close()` 後 App 閃退（`applicationShouldTerminateAfterLastWindowClosed` + `isReleasedWhenClosed`）及 `makeKeyWindow` 警告（改用 `orderFront`）
+- [ ] **LLM 潤飾品質持續優化**：持續觀察 Groq Llama 的輸出品質，收集問題案例加入 prompt 範例
+- [x] **ToastWindow 閃退與警告修復**
+- [x] **Keychain 密碼彈窗修復**：改用 CryptoKit 加密檔案
+- [x] **權限引導重裝後不顯示修復**：啟動時強制檢查
+- [x] **LLM 對話性回覆修復**：XML 標籤 + 後處理 + 相似度檢查三層防護
+- [x] **LLM 擴充原文修復**：禁止附加額外句子
+- [x] **字典功能加強**：強化 prompt 發音替換指令
+- [x] **語音糾錯加強**：語意感知糾錯 + 語意連貫性檢查
 
 ### 中優先
 - [ ] **自動貼上強化**：偵測前台 App 是否有可輸入的文字欄位（AXUIElement API）
@@ -318,9 +374,10 @@ hdiutil create -volname "VoiceInk" -srcfolder dist/dmg-staging -ov -format UDZO 
 - [ ] **多語言切換 UI**：在錄音前可快速切換 STT 語言
 - [ ] **錄音視覺回饋**：在螢幕上顯示錄音中的浮動指示器
 - [ ] **字典功能強化**：支援批次匯入/匯出、詞彙分類標籤
+- [ ] **考慮切換至 OpenAI gpt-4o-mini**：如果 Groq 免費模型的潤飾品質持續不理想
 
 ### 低優先
-- [ ] **正式 Code Sign + Notarize**：取得 Apple Developer 帳號，解決 Keychain/輔助使用權限/Gatekeeper 問題
+- [ ] **正式 Code Sign + Notarize**：取得 Apple Developer 帳號，解決輔助使用權限/Gatekeeper 問題
 - [ ] **Universal Binary**：同時支援 arm64 + x86_64（目前僅 arm64）
 - [ ] **自動更新機制**：Sparkle 框架
 - [ ] **匯出歷史紀錄**：CSV/TXT 匯出功能
